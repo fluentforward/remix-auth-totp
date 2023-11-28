@@ -114,7 +114,7 @@ export interface StoreTOTPOptions {
  * @param data The encrypted OTP.
  */
 export interface StoreTOTP {
-  (data: StoreTOTPOptions): Promise<void>
+  (data: StoreTOTPOptions, context?: AppLoadContext): Promise<void>
 }
 
 /**
@@ -168,6 +168,7 @@ export interface HandleTOTP {
   (
     hash: string,
     data?: { active?: boolean; attempts?: number; expiresAt?: Date | string },
+    context?: AppLoadContext
   ): Promise<{
     hash?: string
     attempts: number
@@ -428,7 +429,7 @@ export class TOTPStrategy<User> extends Strategy<User, TOTPVerifyParams> {
            */
           if (!formDataEmail && !formDataTotp && sessionEmail && sessionTotp) {
             // Invalidate previous TOTP.
-            await this.handleTOTP(sessionTotp, { active: false })
+            await this.handleTOTP(sessionTotp, { active: false }, options.context)
 
             // Assign session email to form email.
             formDataEmail = sessionEmail
@@ -445,7 +446,7 @@ export class TOTPStrategy<User> extends Strategy<User, TOTPVerifyParams> {
             sessionTotp
           ) {
             // Invalidate previous TOTP.
-            await this.handleTOTP(sessionTotp, { active: false })
+            await this.handleTOTP(sessionTotp, { active: false }, options.context)
           }
 
           /**
@@ -478,7 +479,7 @@ export class TOTPStrategy<User> extends Strategy<User, TOTPVerifyParams> {
             await this._saveOTP({ hash: signedTotp, active: true, attempts: 0 })
 
             // Update `expiresAt` database field (if exists).
-            await this._handleExpiresAt(signedTotp, totp)
+            await this._handleExpiresAt(signedTotp, totp, options.context)
 
             // Send TOTP.
             await this._sendOTP({
@@ -523,14 +524,14 @@ export class TOTPStrategy<User> extends Strategy<User, TOTPVerifyParams> {
         if ((isPOST && formDataTotp) || (isGET && magicLinkTotp)) {
           // Validation.
           if (isPOST && formDataTotp) {
-            await this._validateTotp(sessionTotp, formDataTotp)
+            await this._validateTotp(sessionTotp, formDataTotp, options.context)
           }
           if (isGET && magicLinkTotp) {
-            await this._validateTotp(sessionTotp, magicLinkTotp)
+            await this._validateTotp(sessionTotp, magicLinkTotp, options.context)
           }
 
           // Invalidation.
-          await this.handleTOTP(sessionTotp, { active: false })
+          await this.handleTOTP(sessionTotp, { active: false }, options.context)
 
           // Allow developer to handle the user verification.
           user = await this.verify({
@@ -560,10 +561,10 @@ export class TOTPStrategy<User> extends Strategy<User, TOTPVerifyParams> {
       if (error instanceof Response && error.status === 302) throw error
       if (error instanceof Error) {
         if (error.message === ERRORS.INVALID_JWT) {
-          const dbTOTP = await this.handleTOTP(sessionTotp)
+          const dbTOTP = await this.handleTOTP(sessionTotp, undefined, options.context)
           if (!dbTOTP || !dbTOTP.hash) throw new Error(ERRORS.TOTP_NOT_FOUND)
 
-          await this.handleTOTP(sessionTotp, { active: false })
+          await this.handleTOTP(sessionTotp, { active: false }, options.context)
 
           return await this.failure(
             this.customErrors.inactiveTotp || ERRORS.INACTIVE_TOTP,
@@ -604,17 +605,17 @@ export class TOTPStrategy<User> extends Strategy<User, TOTPVerifyParams> {
     if (!regexEmail.test(email)) throw new Error(this.customErrors.invalidEmail)
   }
 
-  private async _saveOTP(totp: StoreTOTPOptions) {
-    await this.storeTOTP(totp)
+  private async _saveOTP(totp: StoreTOTPOptions, context?: AppLoadContext) {
+    await this.storeTOTP(totp, context)
   }
 
   private async _sendOTP(data: SendTOTPOptions) {
     await this.sendTOTP({ ...data })
   }
 
-  private async _validateTotp(sessionTotp: string, otp: string) {
+  private async _validateTotp(sessionTotp: string, otp: string, context?: AppLoadContext) {
     // Retrieve encrypted TOTP from database.
-    const dbTOTP = await this.handleTOTP(sessionTotp)
+    const dbTOTP = await this.handleTOTP(sessionTotp, undefined, context)
     if (!dbTOTP || !dbTOTP.hash) throw new Error(ERRORS.TOTP_NOT_FOUND)
 
     if (dbTOTP.active !== true) {
@@ -625,7 +626,7 @@ export class TOTPStrategy<User> extends Strategy<User, TOTPVerifyParams> {
       this.totpGeneration.maxAttempts ?? this._totpGenerationDefaults.maxAttempts
 
     if (dbTOTP.attempts >= maxAttempts) {
-      await this.handleTOTP(sessionTotp, { active: false })
+      await this.handleTOTP(sessionTotp, { active: false }, context)
       throw new Error(this.customErrors.inactiveTotp)
     }
 
@@ -638,7 +639,7 @@ export class TOTPStrategy<User> extends Strategy<User, TOTPVerifyParams> {
     // Verify TOTP (@epic-web/totp).
     const isValid = verifyTOTP({ ...totp, otp })
     if (!isValid) {
-      await this.handleTOTP(sessionTotp, { attempts: dbTOTP.attempts + 1 })
+      await this.handleTOTP(sessionTotp, { attempts: dbTOTP.attempts + 1 }, context)
       throw new Error(this.customErrors.invalidTotp)
     }
   }
@@ -646,9 +647,10 @@ export class TOTPStrategy<User> extends Strategy<User, TOTPVerifyParams> {
   private async _handleExpiresAt(
     sessionTotp: string,
     totp: Partial<TOTPGenerationOptions>,
+    context?: AppLoadContext
   ) {
     // Retrieve encrypted TOTP from database.
-    const dbTOTP = await this.handleTOTP(sessionTotp)
+    const dbTOTP = await this.handleTOTP(sessionTotp, undefined, context)
 
     if (dbTOTP && 'expiresAt' in dbTOTP) {
       const newExpiresAt =
@@ -668,7 +670,7 @@ export class TOTPStrategy<User> extends Strategy<User, TOTPVerifyParams> {
 
       await this.handleTOTP(sessionTotp, {
         expiresAt: formattedExpiresAt,
-      })
+      }, context)
     }
   }
 }
