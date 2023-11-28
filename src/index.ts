@@ -1,4 +1,4 @@
-import type { SessionStorage } from '@remix-run/server-runtime'
+import type { AppLoadContext, SessionStorage } from '@remix-run/server-runtime'
 import type { AuthenticateOptions, StrategyVerifyCallback } from 'remix-auth'
 
 import { redirect } from '@remix-run/server-runtime'
@@ -315,6 +315,11 @@ export interface TOTPVerifyParams {
    * The Request object.
    */
   request: Request
+
+  /**
+   * The application context.
+   */
+  context?: AppLoadContext;
 }
 
 export class TOTPStrategy<User> extends Strategy<User, TOTPVerifyParams> {
@@ -533,6 +538,7 @@ export class TOTPStrategy<User> extends Strategy<User, TOTPVerifyParams> {
             form: formData,
             magicLink: magicLinkTotp,
             request,
+            context: options.context
           })
 
           session.set(options.sessionKey, user)
